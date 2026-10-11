@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-# --- Machine learning (scikit-learn) ---
+# --- Machine Learning (scikit-learn) ---
 from sklearn.ensemble import IsolationForest
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
@@ -177,9 +177,7 @@ def create_initial_patient_history(seed_id: int):
 
 
 # =====================================================================
-# LAYER 2B: MACHINE LEARNING ENGINE (NEW)
-#   1) Isolation Forest  -> anomaly detection (patient-specific baseline)
-#   2) Linear Regression -> trend analysis + 7-step forecast
+# LAYER 2B: MACHINE LEARNING ENGINE
 # =====================================================================
 ML_FEATURES = [
     "Heart_Rate_BPM",
@@ -192,13 +190,7 @@ MIN_ROWS_FOR_ML = 10
 
 
 def detect_anomalies(history: pd.DataFrame, contamination: float = 0.05):
-    """Train an Isolation Forest on the patient's PAST entries (everything except
-    the newest one), then score every entry. The newest entry is therefore
-    judged as 'new data' against the patient's own learned baseline.
-
-    Returns (scores_df, error_message). scores_df has columns:
-    Anomaly_Score (lower = more abnormal) and Is_Anomaly (bool).
-    """
+    """Train an Isolation Forest on past entries, score all entries."""
     data = history[ML_FEATURES].dropna()
     if len(data) < MIN_ROWS_FOR_ML:
         return None, f"Need at least {MIN_ROWS_FOR_ML} entries for anomaly detection (have {len(data)})."
@@ -212,7 +204,7 @@ def detect_anomalies(history: pd.DataFrame, contamination: float = 0.05):
     ).fit(scaler.transform(train))
 
     scaled_all = scaler.transform(data)
-    scores = model.decision_function(scaled_all)    # < 0 => outlier
+    scores = model.decision_function(scaled_all)
     flags = model.predict(scaled_all) == -1
 
     result = pd.DataFrame(
@@ -223,8 +215,7 @@ def detect_anomalies(history: pd.DataFrame, contamination: float = 0.05):
 
 
 def forecast_trend(series: pd.Series, horizon: int = 7, window: int = 30):
-    """Fit a Linear Regression on the last `window` readings and project
-    `horizon` steps ahead. Returns a dict with slope, direction, forecast, r2."""
+    """Fit a Linear Regression on the last window readings and project horizon steps ahead."""
     s = series.dropna().tail(window)
     if len(s) < MIN_ROWS_FOR_ML:
         return None
@@ -300,4 +291,45 @@ with st.sidebar.form("registration_form", clear_on_submit=True):
             "history": create_initial_patient_history(np.random.randint(1, 500)),
             "notes": "Newly registered patient profile."
         }
-        st.sidebar.success(f"Registered {
+        st.sidebar.success(f"Registered {new_name} ({new_id}) successfully!")
+
+# --- PATIENT SELECTOR ---
+st.sidebar.markdown("---")
+st.sidebar.header("🔍 Select Active Patient")
+selected_pt_id = st.sidebar.selectbox(
+    "Patient Registry",
+    options=list(st.session_state.master_registry.keys()),
+    format_func=lambda x: f"{x}: {st.session_state.master_registry[x]['name']}"
+)
+
+current_patient = st.session_state.master_registry[selected_pt_id]
+
+# --- MAIN DASHBOARD VIEW ---
+st.subheader(f"Clinical Profile: {current_patient['name']} ({selected_pt_id})")
+col1, col2, col3 = st.columns(3)
+col1.metric("Age", f"{current_patient['age']} Years")
+col2.metric("Primary Condition", current_patient['condition'])
+col3.metric("Records Count", len(current_patient['history']))
+
+st.markdown("### Telemetry History & Clinical Trends")
+st.dataframe(current_patient['history'].tail(10), use_container_width=True)
+
+# Voice analysis initialization
+voice_engine = VoiceBiometricEngine()
+
+st.markdown("---")
+st.markdown("### 🎙️ Voice Biometric Diagnostic Engine")
+uploaded_audio = st.file_uploader("Upload Patient Sustained Vowel Audio (.wav)", type=["wav"])
+
+if uploaded_audio is not None:
+    audio_bytes = uploaded_audio.read()
+    results = voice_engine.analyze_uploaded_file(audio_bytes)
+    if "error" in results:
+        st.error(results["error"])
+    else:
+        st.success("Voice analysis completed successfully.")
+        v_col1, v_col2, v_col3, v_col4 = st.columns(4)
+        v_col1.metric("Pitch (Hz)", results["fundamental_pitch_hz"])
+        v_col2.metric("Jitter", results["jitter"])
+        v_col3.metric("Shimmer", results["shimmer"])
+        v_col4.metric("Instability Score", results["instability_score"])
